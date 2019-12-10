@@ -52,7 +52,7 @@ static struct request_queue *Queue;
 /*
  * The internal representation of our device.
  */
-static struct rmem_device {
+static struct sbd_device {
 	unsigned long size;
 	spinlock_t lock;
 	u8 **data;
@@ -117,7 +117,7 @@ static u64 get_fct(int batch_size)
 /*
  * Handle an I/O request.
  */
-static void rmem_transfer(struct rmem_device *dev, sector_t sector,
+static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 		unsigned long nsect, char *buffer, int write, u64 slowdown) 
 {
 	int i;
@@ -141,7 +141,7 @@ static void rmem_transfer(struct rmem_device *dev, sector_t sector,
 //	printk("page=%d,npage=%d,nsect=%ld,sectorsperpage=%ld",page,npage,nsect,SECTORS_PER_PAGE);
 
 	if (page + npage - 1 >= npages) {
-		printk (KERN_NOTICE "rmem: Beyond-end write (%d %d %d)\n", page, npage, npages);
+		printk (KERN_NOTICE "sbd: Beyond-end write (%d %d %d)\n", page, npage, npages);
 		return;
 	}
 
@@ -219,7 +219,7 @@ static void rmem_transfer(struct rmem_device *dev, sector_t sector,
 
 
 
-static void rmem_request(struct request_queue *q) 
+static void sbd_request(struct request_queue *q) 
 {
 	struct request *req;
 	u64 begin = 0ULL;
@@ -304,7 +304,7 @@ static void rmem_request(struct request_queue *q)
 				}
 				else
 				{
-					rmem_transfer(&device, last_sector, last_nsect, last_buffer, last_write, slowdown);
+					sbd_transfer(&device, last_sector, last_nsect, last_buffer, last_write, slowdown);
 					last_sector = sector;
 					last_nsect = nsect;
 					last_buffer = buffer;
@@ -312,7 +312,7 @@ static void rmem_request(struct request_queue *q)
 				}
 			}
 			#else
-			rmem_transfer(&device, blk_rq_pos(req), blk_rq_cur_sectors(req),
+			sbd_transfer(&device, blk_rq_pos(req), blk_rq_cur_sectors(req),
 					bio_data(req->bio), rq_data_dir(req), slowdown);
 			#endif
 			if(get_record)
@@ -323,7 +323,7 @@ static void rmem_request(struct request_queue *q)
 			count++;
 			if ( ! __blk_end_request_cur(req, 0) ) {
 				#if MERGE
-				rmem_transfer(&device, last_sector, last_nsect, last_buffer, last_write, slowdown);
+				sbd_transfer(&device, last_sector, last_nsect, last_buffer, last_write, slowdown);
 				has_req = false;
 				#endif
 				req = blk_fetch_request(q);
@@ -355,7 +355,7 @@ static void rmem_request(struct request_queue *q)
  * calls this. We need to implement getgeo, since we can't
  * use tools such as fdisk to partition the drive otherwise.
  */
-int rmem_getgeo(struct block_device * block_device, struct hd_geometry * geo) {
+int sbd_getgeo(struct block_device * block_device, struct hd_geometry * geo) {
 	long size;
 
 	/* We have no real geometry, of course, so make something up. */
@@ -370,12 +370,12 @@ int rmem_getgeo(struct block_device * block_device, struct hd_geometry * geo) {
 /*
  * The device operations structure.
  */
-static struct block_device_operations rmem_ops = {
+static struct block_device_operations sbd_ops = {
 	.owner  = THIS_MODULE,
-	.getgeo = rmem_getgeo
+	.getgeo = sbd_getgeo
 };
 
-static struct ctl_table rmem_table[] = {
+static struct ctl_table sbd_table[] = {
 	{
 		.procname	= "latency_ns",
 		.data		= &latency_ns,
@@ -449,11 +449,11 @@ static struct ctl_table rmem_table[] = {
 	{ }
 };
 
-static struct ctl_table rmem_root[] = {
+static struct ctl_table sbd_root[] = {
 	{
-		.procname	= "rmem",
+		.procname	= "sbd",
 		.mode		= 0555,
-		.child		= rmem_table,
+		.child		= sbd_table,
 	},
 	{ }
 };
@@ -462,7 +462,7 @@ static struct ctl_table dev_root[] = {
 	{
 		.procname	= "fs",
 		.mode		= 0555,
-		.child		= rmem_root,
+		.child		= sbd_root,
 	},
 	{ }
 };
@@ -558,7 +558,7 @@ static struct file_operations cdf_fops = {
 //end set cdf
 
 
-static int __init rmem_init(void) {
+static int __init sbd_init(void) {
 	int i;
 	if(sizeof(access_record) != RECORD_SIZE)
 		return -ENOMEM;
@@ -580,8 +580,8 @@ static int __init rmem_init(void) {
 	spin_lock_init(&log_lock);
 	spin_lock_init(&cdf_lock);
 
-	log_file = proc_create("rmem_log", 0666, NULL, &log_fops);
-	cdf_file = proc_create("rmem_cdf", 0666, NULL, &cdf_fops);
+	log_file = proc_create("sbd_log", 0666, NULL, &log_fops);
+	cdf_file = proc_create("sbd_cdf", 0666, NULL, &cdf_fops);
 
 	if (!log_file || !cdf_file) {
 		return -ENOMEM;
@@ -610,14 +610,14 @@ static int __init rmem_init(void) {
 
 		memset(device.data[i], 0, logical_block_size);
 		if (i % 100000 == 0)
-			pr_info("rmem: allocated %dth page\n", i);
+			pr_info("sbd: allocated %dth page\n", i);
 	}
 
 	/*
 	 * Get a request queue.
 	 */
 
-	Queue = blk_init_queue(rmem_request, &device.lock);
+	Queue = blk_init_queue(sbd_request, &device.lock);
 	if (Queue == NULL)
 		goto out;
 	blk_queue_physical_block_size(Queue, logical_block_size);
@@ -627,9 +627,9 @@ static int __init rmem_init(void) {
 	/*
 	 * Get registered.
 	 */
-	major_num = register_blkdev(major_num, "rmem");
+	major_num = register_blkdev(major_num, "sbd");
 	if (major_num < 0) {
-		printk(KERN_WARNING "rmem: unable to get major number\n");
+		printk(KERN_WARNING "sbd: unable to get major number\n");
 		goto out;
 	}
 	/*
@@ -641,9 +641,9 @@ static int __init rmem_init(void) {
 		goto out_unregister;
 	device.gd->major = major_num;
 	device.gd->first_minor = 0;
-	device.gd->fops = &rmem_ops;
+	device.gd->fops = &sbd_ops;
 	device.gd->private_data = &device;
-	strcpy(device.gd->disk_name, "rmem0");
+	strcpy(device.gd->disk_name, "sbd0");
 	set_capacity(device.gd, npages * SECTORS_PER_PAGE);
 	device.gd->queue = Queue;
 	add_disk(device.gd);
@@ -653,7 +653,7 @@ static int __init rmem_init(void) {
 	return 0;
 
 out_unregister:
-	unregister_blkdev(major_num, "rmem");
+	unregister_blkdev(major_num, "sbd");
 out:
 	for (i = 0; i < npages; i++)
 		kfree(device.data[i]);
@@ -661,7 +661,7 @@ out:
 	return -ENOMEM;
 }
 
-static void __exit rmem_exit(void)
+static void __exit sbd_exit(void)
 {
 	int i;
 
@@ -673,7 +673,7 @@ static void __exit rmem_exit(void)
 
 	del_gendisk(device.gd);
 	put_disk(device.gd);
-	unregister_blkdev(major_num, "rmem");
+	unregister_blkdev(major_num, "sbd");
 	blk_cleanup_queue(Queue);
 
 	for (i = 0; i < npages; i++)
@@ -683,11 +683,11 @@ static void __exit rmem_exit(void)
 
 	unregister_sysctl_table(sysctl_header);
 
-	remove_proc_entry("rmem_log", NULL);
-	remove_proc_entry("rmem_cdf", NULL);
+	remove_proc_entry("sbd_log", NULL);
+	remove_proc_entry("sbd_cdf", NULL);
 
-	pr_info("rmem: bye!\n");
+	pr_info("sbd: bye!\n");
 }
 
-module_init(rmem_init);
-module_exit(rmem_exit);
+module_init(sbd_init);
+module_exit(sbd_exit);
