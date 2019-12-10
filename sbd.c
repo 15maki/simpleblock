@@ -35,14 +35,14 @@ module_param(npages, int, 0);
 static int get_record = 0;
 module_param(get_record, int, 0);
 
-size_t block_size = 4096
+size_t logical_block_size = 4096;
 
 /*
  * We can tweak our hardware sector size, but the kernel talks to us
  * in terms of small sectors, always.
  */
 #define KERNEL_SECTOR_SIZE 	512
-#define SECTORS_PER_PAGE	(block_size / KERNEL_SECTOR_SIZE)
+#define SECTORS_PER_PAGE	(logical_block_size / KERNEL_SECTOR_SIZE)
 #define MERGE 0
 /*
  * Our request queue
@@ -137,7 +137,6 @@ static void rmem_transfer(struct rmem_device *dev, sector_t sector,
 	//npage = nsect / SECTORS_PER_PAGE;
 
 	page = sector / SECTORS_PER_PAGE;
-    unsigned long nbytes = nsect * block_size;
     npage = nsect / SECTORS_PER_PAGE;
 //	printk("page=%d,npage=%d,nsect=%ld,sectorsperpage=%ld",page,npage,nsect,SECTORS_PER_PAGE);
 
@@ -160,14 +159,14 @@ static void rmem_transfer(struct rmem_device *dev, sector_t sector,
   //              printk("/write=%ld\n",timestamp);
 		spin_lock(&tx_lock);
 		for (i = 0; i < npage; i++)
-            memcpy(dev->data[page+i], buffer, block_size);
-		atomic64_add(npage * block_size, &counter_write);
+            memcpy(dev->data[page+i], buffer, logical_block_size);
+		atomic64_add(npage * logical_block_size, &counter_write);
 
 
 		if(inject_latency){
 //      begin = sched_clock();
 			while ((sched_clock() - begin) < 
-					(((npage * block_size * 8ULL) * 1000000000) / bandwidth_bps) * slowdown / 10000) {
+					(((npage * logical_block_size * 8ULL) * 1000000000) / bandwidth_bps) * slowdown / 10000) {
 				/* wait for transmission delay */
 				;
 			}
@@ -183,14 +182,14 @@ static void rmem_transfer(struct rmem_device *dev, sector_t sector,
 		spin_lock(&rx_lock);
 
 		for (i = 0; i < npage; i++)
-			memcpy(buffer,dev->data[page+i], block_size);
-		atomic64_add(npage * block_size, &counter_read);		
+			memcpy(buffer,dev->data[page+i], logical_block_size);
+		atomic64_add(npage * logical_block_size, &counter_read);		
 
 		
 		if (inject_latency){
 //			begin = sched_clock();
 			while ((sched_clock() - begin) < 
-					(((npage * block_size * 8ULL) * 1000000000) / bandwidth_bps) * slowdown / 10000) {
+					(((npage * logical_block_size * 8ULL) * 1000000000) / bandwidth_bps) * slowdown / 10000) {
 				/* wait for transmission delay */
 				;
 			}
@@ -360,7 +359,7 @@ int rmem_getgeo(struct block_device * block_device, struct hd_geometry * geo) {
 	long size;
 
 	/* We have no real geometry, of course, so make something up. */
-	size = device.size * (block_size / KERNEL_SECTOR_SIZE);
+	size = device.size * (logical_block_size / KERNEL_SECTOR_SIZE);
 	geo->cylinders = (size & ~0x3f) >> 6;
 	geo->heads = 4;
 	geo->sectors = 16;
@@ -574,7 +573,7 @@ static int __init rmem_init(void) {
 		fct_by_size[i] = 0;
 
   
-	pr_info("block_size: %lu", block_size);
+	pr_info("logical_block_size: %lu", logical_block_size);
 	
 	spin_lock_init(&rx_lock);
 	spin_lock_init(&tx_lock);
@@ -592,7 +591,7 @@ static int __init rmem_init(void) {
 	/*
 	 * Set up our internal device.
 	 */
-	device.size = npages * block_size;
+	device.size = npages * logical_block_size;
 	spin_lock_init(&device.lock);
 
 	device.data = vmalloc(npages * sizeof(u8 *));
@@ -600,7 +599,7 @@ static int __init rmem_init(void) {
 		return -ENOMEM;
 
 	for (i = 0; i < npages; i++) {
-		device.data[i] = kmalloc(block_size, GFP_KERNEL);
+		device.data[i] = kmalloc(logical_block_size, GFP_KERNEL);
 		if (device.data[i] == NULL) {
 			int j;
 			for (j = 0; j < i - 1; j++)
@@ -609,7 +608,7 @@ static int __init rmem_init(void) {
 			return -ENOMEM;
 		}
 
-		memset(device.data[i], 0, block_size);
+		memset(device.data[i], 0, logical_block_size);
 		if (i % 100000 == 0)
 			pr_info("rmem: allocated %dth page\n", i);
 	}
@@ -621,10 +620,10 @@ static int __init rmem_init(void) {
 	Queue = blk_init_queue(rmem_request, &device.lock);
 	if (Queue == NULL)
 		goto out;
-	blk_queue_physical_block_size(Queue, block_size);
-	blk_queue_logical_block_size(Queue, block_size);
-	blk_queue_io_min(Queue, block_size);
-	blk_queue_io_opt(Queue, block_size * 4);
+	blk_queue_physical_logical_block_size(Queue, logical_block_size);
+	blk_queue_logical_logical_block_size(Queue, logical_block_size);
+	blk_queue_io_min(Queue, logical_block_size);
+	blk_queue_io_opt(Queue, logical_block_size * 4);
 	/*
 	 * Get registered.
 	 */
