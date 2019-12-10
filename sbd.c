@@ -594,7 +594,7 @@ static int __init sbd_init(void) {
 	device.size = npages * logical_block_size;
 	spin_lock_init(&device.lock);
 
-	device.data = vmalloc(npages * sizeof(u8 *));
+	device.data = vmalloc(npages * logical_block_size);
 	if (device.data == NULL)
 		return -ENOMEM;
 
