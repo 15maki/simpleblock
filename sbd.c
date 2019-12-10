@@ -620,8 +620,8 @@ static int __init rmem_init(void) {
 	Queue = blk_init_queue(rmem_request, &device.lock);
 	if (Queue == NULL)
 		goto out;
-	blk_queue_physical_logical_block_size(Queue, logical_block_size);
-	blk_queue_logical_logical_block_size(Queue, logical_block_size);
+	blk_queue_physical_block_size(Queue, logical_block_size);
+	blk_queue_logical_block_size(Queue, logical_block_size);
 	blk_queue_io_min(Queue, logical_block_size);
 	blk_queue_io_opt(Queue, logical_block_size * 4);
 	/*
