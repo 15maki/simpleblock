@@ -12,7 +12,6 @@
 #include <linux/hdreg.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
-static char *Version = "1.4";
 
 static int major_num = 0;
 module_param(major_num, int, 0);
@@ -44,12 +43,13 @@ static void sbd_transfer(struct sbd_device *dev, sector_t sector,
         printk (KERN_NOTICE "sbd: Beyond-end write (%ld %ld)\n", offset, nbytes);
         return;
     }
-    if (write)
-        printk("write\n");
+    if (write){
+        printk("write nbytes=%ld\n",nbytes);
         memcpy(dev->data + offset, buffer, nbytes);
-    else
-        printk("read\n");
+    }else{
+        printk("read nbytes=%ld\n",nbytes);
         memcpy(buffer, dev->data + offset, nbytes);
+    }
 }
 
 static void sbd_request(struct request_queue *q) {
