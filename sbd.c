@@ -511,33 +511,8 @@ static struct file_operations cdf_fops = {
 
 
 static int __init sbd_init(void) {
-	int i;
-	if(sizeof(access_record) != RECORD_SIZE)
-		return -ENOMEM;
-
-	pr_info("%d, %p", get_record, request_log);
-	if(get_record && request_log == NULL)
-	{
-		request_log = (access_record*)vmalloc(sizeof(access_record) * LOG_BATCH_SIZE);
-		pr_info("Allocated space for %d", LOG_BATCH_SIZE);
-	}
-	for(i = 0; i < FCT_MAX_SIZE; i++)
-		fct_by_size[i] = 0;
-
-  
-	pr_info("logical_block_size: %lu", logical_block_size);
+    pr_info("logical_block_size: %lu", logical_block_size);
 	
-	spin_lock_init(&rx_lock);
-	spin_lock_init(&tx_lock);
-	spin_lock_init(&log_lock);
-	spin_lock_init(&cdf_lock);
-
-	log_file = proc_create("sbd_log", 0666, NULL, &log_fops);
-	cdf_file = proc_create("sbd_cdf", 0666, NULL, &cdf_fops);
-
-	if (!log_file || !cdf_file) {
-		return -ENOMEM;
-	}
 
 
 	/*
@@ -546,7 +521,7 @@ static int __init sbd_init(void) {
 	device.size = npages * logical_block_size;
 	spin_lock_init(&device.lock);
 
-	device.data = kmalloc(npages * logical_block_size,GFP_KERNEL);
+	device.data = vmalloc(npages * logical_block_size);
 	if (device.data == NULL)
 		return -ENOMEM;
 
@@ -561,7 +536,7 @@ static int __init sbd_init(void) {
 		goto out;
 
 	blk_queue_logical_block_size(Queue, logical_block_size);
-    
+
 	/*
 	 * Get registered.
 	 */
@@ -593,20 +568,12 @@ static int __init sbd_init(void) {
 out_unregister:
 	unregister_blkdev(major_num, "sbd");
 out:
-	kfree(device.data);
+	vfree(device.data);
 	return -ENOMEM;
 }
 
 static void __exit sbd_exit(void)
 {
-	int i;
-
-	if(get_record && request_log)
-	{
-		vfree(request_log);
-	}
-
-
 	del_gendisk(device.gd);
 	put_disk(device.gd);
 	unregister_blkdev(major_num, "sbd");
