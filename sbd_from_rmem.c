@@ -42,6 +42,7 @@ size_t logical_block_size = 4096;
  * in terms of small sectors, always.
  */
 #define KERNEL_SECTOR_SIZE 	512
+#define SECTORS_PER_PAGE	(logical_block_size / KERNEL_SECTOR_SIZE)
 #define MERGE 0
 /*
  * Our request queue
@@ -120,13 +121,29 @@ static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 		unsigned long nsect, char *buffer, int write, u64 slowdown) 
 {
 	int i;
-    unsigned long offset = sector * logical_block_size;
-    unsigned long nbytes = nsect * logical_block_size;
+	int page;
+	int npage;
+	u64 begin = 0ULL;
+//	struct timeval tms;
+//	access_record record;
+        struct timespec time;
+        long timestamp;
 
-    if ((offset + nbytes) > dev->size) {
-        printk (KERN_NOTICE "sbd: Beyond-end write (%ld %ld)\n", offset, nbytes);
-        return;
-    }
+	if (sector % SECTORS_PER_PAGE != 0 || nsect % SECTORS_PER_PAGE != 0) {
+		pr_err("incorrect align: %lu %lu %d\n", sector, nsect, write);
+		return;
+	}
+	//page = sector / SECTORS_PER_PAGE;
+	//npage = nsect / SECTORS_PER_PAGE;
+
+	page = sector / SECTORS_PER_PAGE;
+    npage = nsect / SECTORS_PER_PAGE;
+//	printk("page=%d,npage=%d,nsect=%ld,sectorsperpage=%ld",page,npage,nsect,SECTORS_PER_PAGE);
+
+	if (page + npage - 1 >= npages) {
+		printk (KERN_NOTICE "sbd: Beyond-end write (%d %d %d)\n", page, npage, npages);
+		return;
+	}
 
 //	if(get_record){
 //		do_gettimeofday(&tms);
@@ -137,19 +154,19 @@ static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 		begin = sched_clock();
 
 	if (write) {
-        getnstimeofday(&time);
-        timestamp = time.tv_sec * 1000000000L + time.tv_nsec;
-        //printk("/write=%ld\n",timestamp);
-        printk("write/nbytes=%ld",nbytes);
+                getnstimeofday(&time);
+                timestamp = time.tv_sec * 1000000000L + time.tv_nsec;
+  //              printk("/write=%ld\n",timestamp);
 		spin_lock(&tx_lock);
-		memcpy(dev->data + offset, buffer, nbytes);
+		for (i = 0; i < npage; i++)
+            memcpy(dev->data[page+i], buffer, logical_block_size);
 		atomic64_add(npage * logical_block_size, &counter_write);
 
 
 		if(inject_latency){
 //      begin = sched_clock();
 			while ((sched_clock() - begin) < 
-					(((nbytes * 8ULL) * 1000000000) / bandwidth_bps) * slowdown / 10000) {
+					(((npage * logical_block_size * 8ULL) * 1000000000) / bandwidth_bps) * slowdown / 10000) {
 				/* wait for transmission delay */
 				;
 			}
@@ -158,21 +175,21 @@ static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 
 		spin_unlock(&tx_lock);
 	} else {
-        getnstimeofday(&time);
-        timestamp = time.tv_sec * 1000000000L + time.tv_nsec;
-        //printk("/read=%ld\n",timestamp);
-		printk("write/nbytes=%ld",nbytes);
+                getnstimeofday(&time);
+                timestamp = time.tv_sec * 1000000000L + time.tv_nsec;
+                //printk("/read=%ld\n",timestamp);
+		printk("page=%d\n",page);
 		spin_lock(&rx_lock);
 
 		for (i = 0; i < npage; i++)
-		memcpy(buffer, dev->data + offset, nbytes);
+			memcpy(buffer,dev->data[page+i], logical_block_size);
 		atomic64_add(npage * logical_block_size, &counter_read);		
 
 		
 		if (inject_latency){
 //			begin = sched_clock();
 			while ((sched_clock() - begin) < 
-					(((nbytes * 8ULL) * 1000000000) / bandwidth_bps) * slowdown / 10000) {
+					(((npage * logical_block_size * 8ULL) * 1000000000) / bandwidth_bps) * slowdown / 10000) {
 				/* wait for transmission delay */
 				;
 			}
@@ -577,11 +594,24 @@ static int __init sbd_init(void) {
 	device.size = npages * logical_block_size;
 	spin_lock_init(&device.lock);
 
-	device.data = kmalloc(npages * logical_block_size);
+	device.data = vmalloc(npages * logical_block_size);
 	if (device.data == NULL)
 		return -ENOMEM;
 
-    memset(device.data, 0, npages * logical_block_size);
+	for (i = 0; i < npages; i++) {
+		device.data[i] = kmalloc(logical_block_size, GFP_KERNEL);
+		if (device.data[i] == NULL) {
+			int j;
+			for (j = 0; j < i - 1; j++)
+				kfree(device.data[i]);
+			vfree(device.data);
+			return -ENOMEM;
+		}
+
+		memset(device.data[i], 0, logical_block_size);
+		if (i % 100000 == 0)
+			pr_info("sbd: allocated %dth page\n", i);
+	}
 
 	/*
 	 * Get a request queue.
