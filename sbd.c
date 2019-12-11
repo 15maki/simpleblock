@@ -119,6 +119,13 @@ static u64 get_fct(int batch_size)
 static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 		unsigned long nsect, char *buffer, int write, u64 slowdown) 
 {
+	int page;
+	int npage;
+	u64 begin = 0ULL;
+//	struct timeval tms;
+//	access_record record;
+    struct timespec time;
+    long timestamp;
 	int i;
     unsigned long offset = sector * logical_block_size;
     unsigned long nbytes = nsect * logical_block_size;
@@ -143,7 +150,7 @@ static void sbd_transfer(struct sbd_device *dev, sector_t sector,
         printk("write/nbytes=%ld",nbytes);
 		spin_lock(&tx_lock);
 		memcpy(dev->data + offset, buffer, nbytes);
-		atomic64_add(npage * logical_block_size, &counter_write);
+		atomic64_add(nbytes, &counter_write);
 
 
 		if(inject_latency){
@@ -166,7 +173,7 @@ static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 
 		for (i = 0; i < npage; i++)
 		memcpy(buffer, dev->data + offset, nbytes);
-		atomic64_add(npage * logical_block_size, &counter_read);		
+		atomic64_add(nbytes, &counter_read);		
 
 		
 		if (inject_latency){
@@ -577,7 +584,7 @@ static int __init sbd_init(void) {
 	device.size = npages * logical_block_size;
 	spin_lock_init(&device.lock);
 
-	device.data = kmalloc(npages * logical_block_size);
+	device.data = kmalloc(npages * logical_block_size,GFP_KERNEL);
 	if (device.data == NULL)
 		return -ENOMEM;
 
@@ -614,7 +621,7 @@ static int __init sbd_init(void) {
 	device.gd->fops = &sbd_ops;
 	device.gd->private_data = &device;
 	strcpy(device.gd->disk_name, "sbd0");
-	set_capacity(device.gd, npages * SECTORS_PER_PAGE);
+	set_capacity(device.gd, npages);
 	device.gd->queue = Queue;
 	add_disk(device.gd);
 
