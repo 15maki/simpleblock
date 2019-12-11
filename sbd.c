@@ -512,20 +512,17 @@ static struct file_operations cdf_fops = {
 
 static int __init sbd_init(void) {
     pr_info("logical_block_size: %lu", logical_block_size);
-	
-
-
 	/*
 	 * Set up our internal device.
 	 */
 	device.size = npages * logical_block_size;
 	spin_lock_init(&device.lock);
 
-	device.data = vmalloc(npages * logical_block_size);
+	device.data = vmalloc(device.size);
 	if (device.data == NULL)
 		return -ENOMEM;
 
-    memset(device.data, 0, npages * logical_block_size);
+    memset(device.data, 0, device.size);
 
 	/*
 	 * Get a request queue.
