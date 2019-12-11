@@ -559,10 +559,9 @@ static int __init sbd_init(void) {
 	Queue = blk_init_queue(sbd_request, &device.lock);
 	if (Queue == NULL)
 		goto out;
-	blk_queue_physical_block_size(Queue, logical_block_size);
+
 	blk_queue_logical_block_size(Queue, logical_block_size);
-	blk_queue_io_min(Queue, logical_block_size);
-	blk_queue_io_opt(Queue, logical_block_size * 4);
+    
 	/*
 	 * Get registered.
 	 */
@@ -594,9 +593,7 @@ static int __init sbd_init(void) {
 out_unregister:
 	unregister_blkdev(major_num, "sbd");
 out:
-	for (i = 0; i < npages; i++)
-		kfree(device.data[i]);
-	vfree(device.data);
+	kfree(device.data);
 	return -ENOMEM;
 }
 
@@ -614,10 +611,6 @@ static void __exit sbd_exit(void)
 	put_disk(device.gd);
 	unregister_blkdev(major_num, "sbd");
 	blk_cleanup_queue(Queue);
-
-	for (i = 0; i < npages; i++)
-		kfree(device.data[i]);
-
 	vfree(device.data);
 
 	unregister_sysctl_table(sysctl_header);
