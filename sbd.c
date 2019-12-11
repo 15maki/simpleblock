@@ -35,7 +35,7 @@ module_param(npages, int, 0);
 static int get_record = 0;
 module_param(get_record, int, 0);
 
-size_t logical_block_size = 4096;
+size_t logical_block_size = 512;
 
 /*
  * We can tweak our hardware sector size, but the kernel talks to us
@@ -119,14 +119,11 @@ static u64 get_fct(int batch_size)
 static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 		unsigned long nsect, char *buffer, int write, u64 slowdown) 
 {
-	int page;
-	int npage;
 	u64 begin = 0ULL;
 //	struct timeval tms;
 //	access_record record;
     struct timespec time;
     long timestamp;
-	int i;
     unsigned long offset = sector * logical_block_size;
     unsigned long nbytes = nsect * logical_block_size;
 
@@ -282,7 +279,7 @@ static void sbd_request(struct request_queue *q)
 			}
 			#else
 			sbd_transfer(&device, blk_rq_pos(req), blk_rq_cur_sectors(req),
-					bio_data(req->bio), rq_data_dir(req), slowdown);
+					req->buffer, rq_data_dir(req), slowdown);
 			#endif
 			if(get_record)
 			{
@@ -563,12 +560,11 @@ static int __init sbd_init(void) {
 	device.size = npages * logical_block_size;
 	spin_lock_init(&device.lock);
 
-	device.data = kmalloc(npages * logical_block_size,GFP_KERNEL);
+	device.data = vmalloc(npages * logical_block_size,GFP_KERNEL);
 	if (device.data == NULL)
 		return -ENOMEM;
 
     memset(device.data, 0, npages * logical_block_size);
-
 	/*
 	 * Get a request queue.
 	 */
@@ -576,10 +572,8 @@ static int __init sbd_init(void) {
 	Queue = blk_init_queue(sbd_request, &device.lock);
 	if (Queue == NULL)
 		goto out;
-	blk_queue_physical_block_size(Queue, logical_block_size);
+
 	blk_queue_logical_block_size(Queue, logical_block_size);
-	blk_queue_io_min(Queue, logical_block_size);
-	blk_queue_io_opt(Queue, logical_block_size * 4);
 	/*
 	 * Get registered.
 	 */
@@ -611,8 +605,6 @@ static int __init sbd_init(void) {
 out_unregister:
 	unregister_blkdev(major_num, "sbd");
 out:
-	for (i = 0; i < npages; i++)
-		kfree(device.data[i]);
 	vfree(device.data);
 	return -ENOMEM;
 }
@@ -631,9 +623,6 @@ static void __exit sbd_exit(void)
 	put_disk(device.gd);
 	unregister_blkdev(major_num, "sbd");
 	blk_cleanup_queue(Queue);
-
-	for (i = 0; i < npages; i++)
-		kfree(device.data[i]);
 
 	vfree(device.data);
 
