@@ -285,11 +285,6 @@ static void sbd_request(struct request_queue *q)
 			sbd_transfer(&device, blk_rq_pos(req), blk_rq_cur_sectors(req),
 					bio_data(req->bio), rq_data_dir(req), slowdown);
 			#endif
-			if(get_record)
-			{
-				last_dir = rq_data_dir(req);
-				last_page = blk_rq_pos(req) / SECTORS_PER_PAGE;
-			}
 			count++;
 			if ( ! __blk_end_request_cur(req, 0) ) {
 				#if MERGE
@@ -298,15 +293,6 @@ static void sbd_request(struct request_queue *q)
 				#endif
 				req = blk_fetch_request(q);
 			}
-		}
-		if(get_record)
-		{
-			spin_lock(&log_lock);
-	                request_log[log_head] = record;
-	                log_head = (log_head + 1)%LOG_BATCH_SIZE;
-	                if(log_head == log_tail)
-				overflow = 1;
-			spin_unlock(&log_lock);
 		}
 	}
 	if(fct_record_count){
