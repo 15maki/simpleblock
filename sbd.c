@@ -119,6 +119,8 @@ static u64 get_fct(int batch_size)
 static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 		unsigned long nsect, char *buffer, int write, u64 slowdown) 
 {
+	int page;
+	int npage;
 	u64 begin = 0ULL;
 //	struct timeval tms;
 //	access_record record;
@@ -168,6 +170,7 @@ static void sbd_transfer(struct sbd_device *dev, sector_t sector,
         //printk("/read=%ld\n",timestamp);
 		printk("write/nbytes=%ld",nbytes);
 		spin_lock(&rx_lock);
+
 		memcpy(buffer, dev->data + offset, nbytes);
 		atomic64_add(nbytes, &counter_read);		
 
@@ -281,6 +284,11 @@ static void sbd_request(struct request_queue *q)
 			sbd_transfer(&device, blk_rq_pos(req), blk_rq_cur_sectors(req),
 					bio_data(req->bio), rq_data_dir(req), slowdown);
 			#endif
+			if(get_record)
+			{
+				last_dir = rq_data_dir(req);
+				//last_page = blk_rq_pos(req) / SECTORS_PER_PAGE;
+			}
 			count++;
 			if ( ! __blk_end_request_cur(req, 0) ) {
 				#if MERGE
@@ -289,6 +297,15 @@ static void sbd_request(struct request_queue *q)
 				#endif
 				req = blk_fetch_request(q);
 			}
+		}
+		if(get_record)
+		{
+			spin_lock(&log_lock);
+	                request_log[log_head] = record;
+	                log_head = (log_head + 1)%LOG_BATCH_SIZE;
+	                if(log_head == log_tail)
+				overflow = 1;
+			spin_unlock(&log_lock);
 		}
 	}
 	if(fct_record_count){
@@ -511,18 +528,46 @@ static struct file_operations cdf_fops = {
 
 
 static int __init sbd_init(void) {
-    pr_info("logical_block_size: %lu", logical_block_size);
+	int i;
+	if(sizeof(access_record) != RECORD_SIZE)
+		return -ENOMEM;
+
+	pr_info("%d, %p", get_record, request_log);
+	if(get_record && request_log == NULL)
+	{
+		request_log = (access_record*)vmalloc(sizeof(access_record) * LOG_BATCH_SIZE);
+		pr_info("Allocated space for %d", LOG_BATCH_SIZE);
+	}
+	for(i = 0; i < FCT_MAX_SIZE; i++)
+		fct_by_size[i] = 0;
+
+  
+	pr_info("logical_block_size: %lu", logical_block_size);
+	
+	spin_lock_init(&rx_lock);
+	spin_lock_init(&tx_lock);
+	spin_lock_init(&log_lock);
+	spin_lock_init(&cdf_lock);
+
+	log_file = proc_create("sbd_log", 0666, NULL, &log_fops);
+	cdf_file = proc_create("sbd_cdf", 0666, NULL, &cdf_fops);
+
+	if (!log_file || !cdf_file) {
+		return -ENOMEM;
+	}
+
+
 	/*
 	 * Set up our internal device.
 	 */
 	device.size = npages * logical_block_size;
 	spin_lock_init(&device.lock);
 
-	device.data = vmalloc(device.size);
+	device.data = kmalloc(npages * logical_block_size,GFP_KERNEL);
 	if (device.data == NULL)
 		return -ENOMEM;
 
-    memset(device.data, 0, device.size);
+    memset(device.data, 0, npages * logical_block_size);
 
 	/*
 	 * Get a request queue.
@@ -531,9 +576,10 @@ static int __init sbd_init(void) {
 	Queue = blk_init_queue(sbd_request, &device.lock);
 	if (Queue == NULL)
 		goto out;
-
+	blk_queue_physical_block_size(Queue, logical_block_size);
 	blk_queue_logical_block_size(Queue, logical_block_size);
-
+	blk_queue_io_min(Queue, logical_block_size);
+	blk_queue_io_opt(Queue, logical_block_size * 4);
 	/*
 	 * Get registered.
 	 */
@@ -565,16 +611,30 @@ static int __init sbd_init(void) {
 out_unregister:
 	unregister_blkdev(major_num, "sbd");
 out:
+	for (i = 0; i < npages; i++)
+		kfree(device.data[i]);
 	vfree(device.data);
 	return -ENOMEM;
 }
 
 static void __exit sbd_exit(void)
 {
+	int i;
+
+	if(get_record && request_log)
+	{
+		vfree(request_log);
+	}
+
+
 	del_gendisk(device.gd);
 	put_disk(device.gd);
 	unregister_blkdev(major_num, "sbd");
 	blk_cleanup_queue(Queue);
+
+	for (i = 0; i < npages; i++)
+		kfree(device.data[i]);
+
 	vfree(device.data);
 
 	unregister_sysctl_table(sysctl_header);
