@@ -119,8 +119,6 @@ static u64 get_fct(int batch_size)
 static void sbd_transfer(struct sbd_device *dev, sector_t sector,
 		unsigned long nsect, char *buffer, int write, u64 slowdown) 
 {
-	int page;
-	int npage;
 	u64 begin = 0ULL;
 //	struct timeval tms;
 //	access_record record;
@@ -170,8 +168,6 @@ static void sbd_transfer(struct sbd_device *dev, sector_t sector,
         //printk("/read=%ld\n",timestamp);
 		printk("write/nbytes=%ld",nbytes);
 		spin_lock(&rx_lock);
-
-		for (i = 0; i < npage; i++)
 		memcpy(buffer, dev->data + offset, nbytes);
 		atomic64_add(nbytes, &counter_read);		
 
