@@ -252,27 +252,7 @@ static void sbd_request(struct request_queue *q)
 				__blk_end_request_all(req, -EIO);
 				continue;
 			}
-			if(get_record)
-			{
-				if(rq_data_dir(req) == last_dir && last_page + 1 == blk_rq_pos(req) / SECTORS_PER_PAGE)
-				{
-					record.length++;
-				}
-				else
-				{
-					if(last_dir != -1 || last_page != -2)
-					{
-						spin_lock(&log_lock);
-				                request_log[log_head] = record;
-				                log_head = (log_head + 1)%LOG_BATCH_SIZE;
-				                if(log_head == log_tail)
-                        				overflow = 1;
-						spin_unlock(&log_lock);
-					}
-					record.length = 1;
-					record.page = blk_rq_pos(req) / SECTORS_PER_PAGE * (rq_data_dir(req)?1:-1);
-				}
-			}
+
 			#if MERGE
 			if(!has_req)
 			{
